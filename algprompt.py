@@ -14,8 +14,8 @@ from dataset_utils import load_all_dataset,dataset_dicts
 from peft import LoraConfig
 def parser_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--target_model',type=str,default='microsoft/phi-2')
-    parser.add_argument('--agent_model',type=str,default='microsoft/phi-2')
+    parser.add_argument('--target_model',type=str,default='google/gemma-1.1-2b-it')
+    parser.add_argument('--agent_model',type=str,default='google/gemma-1.1-2b-it')
     parser.add_argument('--task',type=str,default='classification')
     parser.add_argument('--dataset',type=str,default='sst2')
     parser.add_argument(
