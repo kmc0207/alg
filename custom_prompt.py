@@ -47,7 +47,7 @@ def main():
     device= 'cuda:0'
     wandb.init(project='ALGprompt', 
                config=args,
-               name = args.task + '_' + args.dataset + '_' + args.agent_model + '_' + args.target_model)
+               name = args.task + '_' + args.dataset + '_' + args.target_model)
     
     
     if args.verbalizer is None:
@@ -72,39 +72,6 @@ def main():
     train_dataloader = DataLoader(train_dataset,batch_size = 4,shuffle = True)
     
     
-        #load agent model
-    config = PPOConfig(
-        model_name = args.agent_model,
-        learning_rate = 1e-4,
-        batch_size = args.batch_size,
-        mini_batch_size= args.batch_size,
-        log_with='wandb',
-    )
-    lora_config = LoraConfig(
-        r= 16,
-        lora_alpha = 32,
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM"
-    )
-    agent_tokenizer = AutoTokenizer.from_pretrained(args.agent_model,cache_dir = args.cache_dir)
-    agent_model = AutoModelForCausalLMWithValueHead.from_pretrained(
-        args.agent_model,
-        torch_dtype=torch.bfloat16,
-        device_map = 'auto',
-        peft_config = lora_config,
-        cache_dir = args.cache_dir
-    )
-    ref_model = AutoModelForCausalLMWithValueHead.from_pretrained(
-        args.agent_model,
-        torch_dtype=torch.bfloat16,
-        device_map = 'auto',
-        peft_config = lora_config,
-        cache_dir = args.cache_dir
-    )
-    agent_tokenizer.pad_token = agent_tokenizer.eos_token
-    ppo_trainer = PPOTrainer(config,agent_model,ref_model,agent_tokenizer)
-    
     #load target model
     target_tokenizer = AutoTokenizer.from_pretrained(args.target_model,cache_dir = args.cache_dir)
     target_model = AutoModelForCausalLM.from_pretrained(args.target_model,
@@ -122,7 +89,7 @@ def main():
     "top_k": 0.0,
     "top_p": 1.0,
     "do_sample": True,
-    "pad_token_id": agent_tokenizer.eos_token_id,
+    "pad_token_id": target_tokenizer.eos_token_id,
     "max_new_tokens":args.max_prompt_length,
     "min_length": -1,
     }
@@ -131,7 +98,7 @@ def main():
     #setting verbalizer ids
     verbalizer_ids=  []
     for i in range(len(verbalizer)):
-        verbalizer_ids.append(agent_tokenizer.convert_tokens_to_ids(verbalizer[i]))
+        verbalizer_ids.append(target_tokenizer.convert_tokens_to_ids(verbalizer[i]))
     prompt_queue = queue.get_top_texts()
     new_acc = utils.evaluation(
         [args.prompt],
