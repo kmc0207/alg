@@ -44,7 +44,7 @@ def main():
     #torch.backends.cuda.enable_flash_sdp(False)
     args = parser_args()
     device=  'cuda:0'
-    wandb.init(project='ALGprompt', 
+    wandb.init(project='TTA-ALGprompt', 
                config=args,
                name = args.task + '_' + args.dataset + '_' + args.agent_model + '_' + args.target_model)
     
