@@ -24,7 +24,7 @@ def parser_args():
         nargs = '+',
         default = None
     )
-    parser.add_argument('--cache_dir',type=str,default='./')
+    parser.add_argument('--cache_dir',type=str,default='/mnt/sdb/llm/')
     parser.add_argument('--batch_size',type=int,default=3)
     parser.add_argument('--max_prompt_length',type=int,default=100)
     parser.add_argument('--train_data_per_labels',type=int,default=10)

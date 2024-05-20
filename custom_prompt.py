@@ -99,7 +99,6 @@ def main():
     verbalizer_ids=  []
     for i in range(len(verbalizer)):
         verbalizer_ids.append(target_tokenizer.convert_tokens_to_ids(verbalizer[i]))
-    prompt_queue = queue.get_top_texts()
     new_acc = utils.evaluation(
         [args.prompt],
         test_dataset,
@@ -108,8 +107,7 @@ def main():
         device,
         verbalizer.values(),
     )
-    for i in range(len(prompt_queue)):
-        print('prompt : ',prompt_queue[i][1],'acc : ',new_acc[i])
+    print(new_acc)
             
 if __name__ == '__main__':
     main()
