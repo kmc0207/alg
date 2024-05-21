@@ -65,7 +65,7 @@ def load_bigbench_sports_understanding():
 
 
 def load_mmlu(dataset_name):
-    dataset_name = dataset_name.split('-')[1]
+    #dataset_name = dataset_name.split('-')[1]
     train_sentences = load_dataset('cais/mmlu',dataset_name,split='test')
     train_labels = train_sentences['answer']
     test_sentences = load_dataset('cais/mmlu',dataset_name,split='test')
@@ -433,6 +433,12 @@ def load_all_dataset(dataset_name):
     
 def dataset_names():
     return ['sst2','qnli','mnli','agnews','yelp_polarity','rte','mrpc','snli']
+
+def load_qa_dataset(dataset_name):
+    return load_mmlu(dataset_name)
+
+def qa_dicts():
+    return {0 : 'A',1 : 'B',2 : 'C',3 : 'D'}
 
 def dataset_dicts(dataset_name):
     if 'mmlu' in dataset_name:
