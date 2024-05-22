@@ -10,7 +10,7 @@ import copy
 import random
 import heapq
 import utils
-from dataset_utils import load_all_dataset,dataset_dicts,load_qa_dataset,qa_dicts
+from dataset_utils import load_all_dataset,dataset_dicts,load_qa_dataset,qa_dicts,load_generation_dataset
 from peft import LoraConfig
 def parser_args():
     parser = argparse.ArgumentParser()
@@ -37,6 +37,7 @@ def parser_args():
                         ''',)
     parser.add_argument('--prompt_per_example',type=int,default=4)
     parser.add_argument('--learning_rate',type=float,default=1e-5)
+    parser.add_argument('--threshold',type=float,default=0.05)
     args = parser.parse_args()
     return args
 
@@ -75,6 +76,15 @@ def main():
             verbalizer = qa_dicts()
         num_labels = len(verbalizer)
         validation_dataset = train_dataset
+    
+    elif args.task == 'generation':
+        dataset = load_generation_dataset(args.dataset)
+        train_dataset = dataset[0]
+        test_dataset = dataset[2]
+        test_dataset = utils.create_balanced_subset(test_dataset,100)
+        verbalizer = None
+        validation_dataset = train_dataset
+    
     else:
         #TODO
         pass
@@ -139,60 +149,34 @@ def main():
     
     #setting verbalizer ids
     verbalizer_ids=  []
-    for i in range(len(verbalizer)):
-        verbalizer_ids.append(agent_tokenizer.convert_tokens_to_ids(verbalizer[i]))
+    if verbalizer is not None:
+        for i in range(len(verbalizer)):
+            verbalizer_ids.append(agent_tokenizer.convert_tokens_to_ids(verbalizer[i]))
     
     
     
     
-    test_acc = 0
-    test_total = 0
-    print('start test')
-    # 랜덤하게 5개의 배치 인덱스를 선택합니다.
-    random_batches = random.sample(range(len(test_dataloader)), 5)
-    batch_count = 0
-    for batch in tqdm(test_dataloader):
-        with torch.no_grad():
-            inputs = batch['text']
-            labels = batch['label']
-            examples = utils.got_example(validation_dataset,verbalizer,shot=args.num_example)
-            query_text = [
-                {"role" : "user", "content" : args.meta_prompt + '\n' + examples},
-                {"role":"assistant","content" : "Sure. Let me see what input friend sees "},
-                {"role" : "user", "content" : "The input that friend sees : " + inputs[0]},
-                {"role": "assistant","content" : "The Instruction is : '"}
-            ]
-            query_encoded = agent_tokenizer.apply_chat_template(
-                query_text,
-                return_tensors='pt'
-            ).view(-1).to('cuda:0')
-            response_tensors = ppo_trainer.generate(
-                query_encoded,
-                **generation_kwargs,
-                return_prompt=False,
-                num_return_sequences = 1
-            )
-            used_prompt = [agent_tokenizer.decode(r.squeeze(),skip_special_tokens=True) for r in response_tensors]
-            prompt = used_prompt[0]
-            template = prompt + "\nInput : " + inputs[0] + "Output : "
-            # 선택된 배치 인덱스일 때만 template을 출력합니다.
-            if batch_count in random_batches:
-                print(template)
-            prompt_encoded = target_tokenizer(template,return_tensors='pt').to(device)
-            outputs = target_model(**prompt_encoded)
-            logits = outputs.logits
-            verbalizer_logits = logits[:, -1, verbalizer_ids]
-            label= labels
-            if torch.argmax(verbalizer_logits).item() == label:
-                test_acc += 1
-            test_total += 1
-            batch_count += 1
-    print('Test Accuracy : ', test_acc / test_total)
+    test_acc = utils.tta_evaluation(
+        test_dataloader,
+        validation_dataset,
+        target_model,
+        target_tokenizer,
+        ppo_trainer,
+        agent_tokenizer,
+        verbalizer_ids,
+        verbalizer,
+        args,
+        generation_kwargs,
+        device,
+        log=False,
+    )
+    print('Test Accuracy : ', test_acc)
     wandb.log({
-        'test_acc' : test_acc / test_total
+        'test_acc' : test_acc
     })
     
-    
+    test_accs = [test_acc]
+    change_num = 0
     #start training
     for ep in tqdm(range(args.epochs)):
         max_total_loss = 0
@@ -234,7 +218,7 @@ def main():
             losses = []
             with torch.no_grad(): 
                 for prompt in used_prompt:
-                    template = prompt + "Input : " + inputs[0] + "Output : "
+                    template = prompt +  inputs[0] + "\nOutput : "
                     prompt_encoded = target_tokenizer(template,return_tensors='pt').to(device)
                     #print(prompt_encoded)
                     outputs = target_model(**prompt_encoded)
@@ -270,51 +254,36 @@ def main():
         
         #start evaluation
         if ep % 1 == 0:
-            test_acc = 0
-            test_total = 0
-            print('start test')
-            # 랜덤하게 5개의 배치 인덱스를 선택합니다.
-            random_batches = random.sample(range(len(test_dataloader)), 5)
-            batch_count = 0
-            for batch in tqdm(test_dataloader):
-                with torch.no_grad():
-                    inputs = batch['text']
-                    labels = batch['label']
-                    examples = utils.got_example(validation_dataset,verbalizer,shot=args.num_example)
-                    query_text = [
-                        {"role" : "user", "content" : args.meta_prompt + '\n' + examples},
-                        {"role":"assistant","content" : "Sure. Let me see what input friend sees "},
-                        {"role" : "user", "content" : "The input that friend sees : " + inputs[0]},
-                        {"role": "assistant","content" : "The Instruction is : "}
-                    ]
-                    query_encoded = agent_tokenizer.apply_chat_template(
-                        query_text,
-                        return_tensors='pt'
-                    ).view(-1)
-                    response_tensors = ppo_trainer.generate(
-                        query_encoded,
-                        **generation_kwargs,
-                        return_prompt=False,
-                        num_return_sequences = 1
-                    )
-                    used_prompt = [agent_tokenizer.decode(r.squeeze(),skip_special_tokens=True) for r in response_tensors]
-                    prompt = used_prompt[0]
-                    template = prompt + "\nInput : " + inputs[0] + "Output : "
-                    # 선택된 배치 인덱스일 때만 template을 출력합니다.
-                    if batch_count in random_batches:
-                        print(template)
-                    prompt_encoded = target_tokenizer(template,return_tensors='pt').to(device)
-                    outputs = target_model(**prompt_encoded)
-                    logits = outputs.logits
-                    verbalizer_logits = logits[:, -1, verbalizer_ids]
-                    label= labels
-                    if torch.argmax(verbalizer_logits).item() == label:
-                        test_acc += 1
-                    test_total += 1
-                    batch_count += 1
-            print('Test Accuracy : ', test_acc / test_total)
+            test_acc = utils.tta_evaluation(
+                test_dataloader,
+                validation_dataset,
+                target_model,
+                target_tokenizer,
+                ppo_trainer,
+                agent_tokenizer,
+                verbalizer_ids,
+                verbalizer,
+                args,
+                generation_kwargs,
+                device,
+                log=True,
+            )
+            diff = test_acc - test_accs[-1]
+            if diff < - args.threshold:
+                ppo_trainer.model = ppo_trainer.ref_model
+                change_num -= 1
+            elif diff > args.threshold:
+                ppo_trainer.ref_model = ppo_trainer.model
+                change_num +=1
+            else:
+                change_num = change_num
+            if change_num < 0 :
+                change_num = 0
+            test_accs.append(test_acc)
+            print(test_acc)
             wandb.log({
-                'test_acc' : test_acc / test_total
+                'test_acc' : test_acc,
+                'change_num' : change_num
             })
         
             

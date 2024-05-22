@@ -82,6 +82,21 @@ def load_mmlu(dataset_name):
         item['label'] = item['answer']
     return train_sentences, train_labels, test_sentences, test_labels
 
+def load_squad():
+    train_sentences = load_dataset('rajpurkar/squad',split='train')
+    train_labels = train_sentences['answers']
+    test_sentences = load_dataset('rajpurkar/squad',split='validation')
+    test_labels = test_sentences['answers']
+    train_sentences = [sentence for sentence in train_sentences]
+    test_sentences = [sentence for sentence in test_sentences]
+    for item in train_sentences:
+        item['text'] = 'Hint :' + item['context'] + ' \nQuestion : ' + item['question'] + '\n'
+        item['label'] = item['answers']
+    for item in test_sentences:
+        item['text'] = 'Hint :' + item['context'] + ' \nQuestion : ' + item['question'] + '\n'
+        item['label'] = item['answers']
+    return train_sentences, train_labels, test_sentences, test_labels
+
 def load_qa_econometrics():
     train_sentences = load_dataset('cais/mmlu','econometrics',split='test')
     train_labels = train_sentences['answer']
@@ -202,9 +217,9 @@ def load_sst2():
     train_sentences = [sentence for sentence in train_sentences]
     test_sentences = [sentence for sentence in test_sentences]
     for item in train_sentences:
-        item['text'] = item['sentence']
+        item['text'] = 'Input :' + item['sentence'] + '\n'
     for item in test_sentences:
-        item['text'] = item['sentence']
+        item['text'] = 'Input :' + item['sentence'] + '\n'
     return train_sentences, train_labels, test_sentences, test_labels
 
 def load_qnli():
@@ -436,6 +451,10 @@ def dataset_names():
 
 def load_qa_dataset(dataset_name):
     return load_mmlu(dataset_name)
+
+def load_generation_dataset(dataset_name):
+    if dataset_name == 'squad':
+        return load_squad()
 
 def qa_dicts():
     return {0 : 'A',1 : 'B',2 : 'C',3 : 'D'}

@@ -14,8 +14,8 @@ from dataset_utils import load_all_dataset,dataset_dicts
 from peft import LoraConfig
 def parser_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--target_model',type=str,default='google/gemma-1.1-2b-it')
-    parser.add_argument('--agent_model',type=str,default='google/gemma-1.1-2b-it')
+    parser.add_argument('--target_model',type=str,default='google/gemma-1.1-7b-it')
+    parser.add_argument('--agent_model',type=str,default='google/gemma-1.1-7b-it')
     parser.add_argument('--task',type=str,default='classification')
     parser.add_argument('--dataset',type=str,default='sst2')
     parser.add_argument(
@@ -36,6 +36,9 @@ def parser_args():
                         Plase write instruction to help my friends. Here are the input-output pairs:
                         ''',)
     parser.add_argument('--prompt_per_example',type=int,default=2)
+    parser.add_argument('--update_term',type=int,default=1)
+    parser.add_argument('--update_threshold',type=float,default=0.05)   
+    parser.add_argument('--num_test_example',type=int,default=20)
 
     args = parser.parse_args()
     return args
@@ -62,6 +65,7 @@ def main():
         train_dataset,validation_dataset = utils.create_balanced_subset_and_validation(train_dataset,
                                                                                        args.train_data_per_labels * num_labels,
                                                                                        )
+        test_dataset = utils.create_balanced_subset(test_dataset,args.num_test_example)
     else:
         #TODO
         pass
@@ -133,6 +137,7 @@ def main():
         verbalizer_ids.append(agent_tokenizer.convert_tokens_to_ids(verbalizer[i]))
     
     queue = utils.TopAccuracyTextsNoDuplicates(max_size=5)
+    change_num = 0
     #start training
     for ep in tqdm(range(args.epochs)):
         max_total_loss = 0
@@ -204,6 +209,51 @@ def main():
                 'mean_reward' : mean_reward,
                 'max_reward' : max_reward,
             })
+            
+            
+        #reference model update
+        if ep % args.update_term == 0 :
+            response_tensors,ref_response_tensors = ppo_trainer.generate(query_encoded.view(-1),**generation_kwargs,return_prompt=False, num_return_sequences=bs,generate_ref_response=True)
+            used_prompt = [agent_tokenizer.decode(r.squeeze(),skip_special_tokens=True) for r in response_tensors]
+            ref_used_prompt = [agent_tokenizer.decode(r.squeeze(),skip_special_tokens=True) for r in ref_response_tensors]
+            acc = utils.evaluation(
+                used_prompt,
+                test_dataset,
+                target_model,
+                target_tokenizer,
+                device,
+                verbalizer.values(),
+            )
+            ref_acc = utils.evaluation(
+                ref_used_prompt,
+                test_dataset,
+                target_model,
+                target_tokenizer,
+                device,
+                verbalizer.values(),
+            )
+            print('acc : ', acc)
+            print('ref_acc : ', ref_acc)
+            mean_acc = np.mean(np.array(acc))
+            mean_ref_acc = np.mean(np.array(ref_acc))
+            diff = mean_acc - mean_ref_acc
+            if diff > args.update_threshold:
+                ppo_trainer.ref_model =  ppo_trainer.model
+                print('update ref model')
+                change_num +=1
+            elif diff < -args.update_threshold:
+                ppo_trainer.model = ppo_trainer.ref_model
+                print('rollback model')
+                change_num -=1
+            else:
+                change_num=change_num
+            if change_num < 0 :
+                change_num = 0
+            wandb.log({
+                'change_num' : change_num,
+            })
+                            
+            
     print('Final test Start')
     prompt_queue = queue.get_top_texts()
     new_acc = utils.evaluation(

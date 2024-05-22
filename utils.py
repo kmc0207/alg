@@ -26,6 +26,40 @@ import random
 import torch
 import heapq
 import torch.nn.functional as F
+from collections import Counter
+import string
+
+def normalize_answer(s):
+    """소문자 변환, 공백 제거, 문장부호 제거 등을 통해 답변을 정규화"""
+    def white_space_fix(text):
+        return ' '.join(text.split())
+    def remove_punctuation(text):
+        return text.translate(str.maketrans('', '', string.punctuation))
+    def lower(text):
+        print(text)
+        return text.lower()
+    return white_space_fix(remove_punctuation(lower(s)))
+
+def f1_score_single(prediction, ground_truth):
+    #print(prediction,ground_truth)
+    #rint('gt : ',ground_truth)
+    prediction_tokens = normalize_answer(prediction).split()
+    ground_truth_tokens = normalize_answer(ground_truth).split()
+    common_tokens = Counter(prediction_tokens) & Counter(ground_truth_tokens)
+    num_same = sum(common_tokens.values())
+    
+    if num_same == 0:
+        return 0
+    
+    precision = 1.0 * num_same / len(prediction_tokens)
+    recall = 1.0 * num_same / len(ground_truth_tokens)
+    f1 = (2 * precision * recall) / (precision + recall)
+    
+    return f1
+
+def f1_score(prediction, ground_truths):
+    scores = [f1_score_single(prediction, truth) for truth in ground_truths]
+    return max(scores) if scores else 0
 
 class TopAccuracyTextsNoDuplicates:
     def __init__(self, max_size=5):
@@ -197,7 +231,8 @@ def induction_soft(
                 reward += answer_log_probs
         rewards.append(reward)
     return rewards, [0.0 for i in range(len(prompts))]
-            
+
+
             
 
 def language_feedback(
@@ -899,13 +934,23 @@ def got_example(dataset,dataset_dict,shot=5,label_key='label'):
         if example[label_key] == -1:
             continue
         if 'text' in example.keys():
-            a = 'Input : ' + example['text']+ '\nOutput : '+ dataset_dict[example[label_key]] + '\n'
+            a = example['text']+ '\nOutput : '+ dataset_dict[example[label_key]] + '\n'
             examples += a 
         else:
-            a= 'Input : ' + example['sentence']+ '\nOutput : '+ dataset_dict[example[label_key]] + '\n'
+            a= xample['sentence']+ '\nOutput : '+ dataset_dict[example[label_key]] + '\n'
             #examples.append(a)
             examples += a
             
+    return examples
+
+def got_example_generation(dataset,shot=5):
+    examples =''
+    for i in range(shot):
+        ids = random.randint(0,len(dataset)-1)
+        example = dataset[ids]
+        a = 'Input : ' + example['text']+ '\nOutput : '+ example['label']['text'][0] + '\n'
+        
+        examples += a
     return examples
 
 def got_example_input(dataset,dataset_dict,shot=5,in_sentence=False):
@@ -958,3 +1003,65 @@ def reward_openai(
     #     rewards : 각 입력에 대한 보상. 아마 log probability가 될 것 같음 (예: [0.95, 0.92])
     #     accuracy : 각 prompt에 대한 정확도 (예: [0.95, 0.92])
     return [torch.Tensor(0.00) for i in range(len(prompts))], [torch.Tensor(0.00) for i in range(len(prompts))]
+
+
+def tta_evaluation(
+    test_dataloader,
+    validation_dataset,
+    target_model,
+    target_tokenizer,
+    ppo_trainer,
+    agent_tokenizer,
+    verbalizer_ids,
+    verbalizer,
+    args,
+    generation_kwargs,
+    device,
+    
+    log=False,
+):
+    test_acc = 0
+    test_total = 0
+    print('start test')
+    # 랜덤하게 5개의 배치 인덱스를 선택합니다.
+    random_batches = random.sample(range(len(test_dataloader)), 5)
+    batch_count = 0
+    for batch in test_dataloader:
+        with torch.no_grad():
+            inputs = batch['text']
+            labels = batch['label']
+            examples = got_example(validation_dataset,verbalizer,shot=args.num_example)
+            query_text = [
+                {"role" : "user", "content" : args.meta_prompt + '\n' + examples},
+                {"role":"assistant","content" : "Sure. Let me see what input friend sees "},
+                {"role" : "user", "content" : "The input that friend sees : " + inputs[0]},
+                {"role": "assistant","content" : "The Instruction is : '"}
+            ]
+            query_encoded = agent_tokenizer.apply_chat_template(
+                query_text,
+                return_tensors='pt'
+            ).view(-1).to('cuda:0')
+            response_tensors = ppo_trainer.generate(
+                query_encoded,
+                **generation_kwargs,
+                return_prompt=False,
+                num_return_sequences = 1
+            )
+            used_prompt = [agent_tokenizer.decode(r.squeeze(),skip_special_tokens=True) for r in response_tensors]
+            prompt = used_prompt[0]
+            template = prompt +  inputs[0] + "\nOutput : "
+            # 선택된 배치 인덱스일 때만 template을 출력합니다.
+            if batch_count in random_batches and log:
+                print(template)
+            prompt_encoded = target_tokenizer(template,return_tensors='pt').to(device)
+            outputs = target_model(**prompt_encoded)
+            logits = outputs.logits
+            verbalizer_logits = logits[:, -1, verbalizer_ids]
+            label= labels
+            if torch.argmax(verbalizer_logits).item() == label:
+                test_acc += 1
+            test_total += 1
+            batch_count += 1
+    test_accuracy = test_acc / test_total
+    return test_accuracy * 100
+    
