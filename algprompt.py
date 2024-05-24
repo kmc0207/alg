@@ -10,7 +10,7 @@ import copy
 import random
 import heapq
 import utils
-from dataset_utils import load_all_dataset,dataset_dicts
+from dataset_utils import load_all_dataset,dataset_dicts,load_qa_dataset,qa_dicts,load_generation_dataset
 from peft import LoraConfig
 def parser_args():
     parser = argparse.ArgumentParser()
@@ -47,29 +47,43 @@ def main():
     
     args = parser_args()
     device= 'cuda:0'
-    wandb.init(project='ALGprompt', 
+    wandb.init(project='algprompt_' +args.task + '_' + args.dataset, 
                config=args,
                name = args.task + '_' + args.dataset + '_' + args.agent_model + '_' + args.target_model)
     
     
-    if args.verbalizer is None:
-        verbalizer = dataset_dicts(args.dataset)
-    num_labels = len(verbalizer)
-    print('Verbalizer : ', verbalizer)
-    
-    #load dataset
     if args.task == 'classification':
         dataset = load_all_dataset(args.dataset)
         train_dataset = dataset[0]
         test_dataset = dataset[2]
+        test_dataset = utils.create_balanced_subset(test_dataset,100)
+        if args.verbalizer is None:
+            verbalizer = dataset_dicts(args.dataset)
+        num_labels = len(verbalizer)
         train_dataset,validation_dataset = utils.create_balanced_subset_and_validation(train_dataset,
                                                                                        args.train_data_per_labels * num_labels,
                                                                                        )
-        test_dataset = utils.create_balanced_subset(test_dataset,args.num_test_example)
+    elif args.task == 'qa':
+        dataset = load_qa_dataset(args.dataset)
+        train_dataset = dataset[0]
+        test_dataset = dataset[2]
+        test_dataset = utils.create_balanced_subset(test_dataset,100)
+        if args.verbalizer is None:
+            verbalizer = qa_dicts()
+        num_labels = len(verbalizer)
+        validation_dataset = train_dataset
+    
+    elif args.task == 'generation':
+        dataset = load_generation_dataset(args.dataset)
+        train_dataset = dataset[0]
+        test_dataset = dataset[2]
+        test_dataset = utils.create_balanced_subset(test_dataset,100)
+        verbalizer = None
+        validation_dataset = train_dataset
+    
     else:
         #TODO
         pass
-        
     #make dataloader
     test_dataloader = DataLoader(test_dataset,batch_size = 4,shuffle = True)
     train_dataloader = DataLoader(train_dataset,batch_size = 4,shuffle = True)
@@ -251,6 +265,8 @@ def main():
                 change_num = 0
             wandb.log({
                 'change_num' : change_num,
+                'valid_acc' : mean_acc,
+                'ref_valid_acc' : mean_ref_acc,
             })
                             
             
@@ -266,6 +282,10 @@ def main():
     )
     for i in range(len(prompt_queue)):
         print('prompt : ',prompt_queue[i][1],'acc : ',new_acc[i])
+    max_new_acc = np.max(np.array(new_acc))
+    wandb.log({
+        'final_acc' : max_new_acc,
+    })
             
 if __name__ == '__main__':
     main()

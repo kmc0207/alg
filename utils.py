@@ -36,7 +36,7 @@ def normalize_answer(s):
     def remove_punctuation(text):
         return text.translate(str.maketrans('', '', string.punctuation))
     def lower(text):
-        print(text)
+        #print(text)
         return text.lower()
     return white_space_fix(remove_punctuation(lower(s)))
 
