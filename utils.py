@@ -499,14 +499,17 @@ def evaluation(prompts,
                side='First',
                MaskLM=False,
                batch_size =16,
-               return_wrong = False,
+               soft_diff = False,
                ):
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=False)
     model.eval()
     accuracys = []
-    for prompt in tqdm(prompts):
+    wrongs = []
+    sds = []
+    for prompt in prompts:
         total = 0
         correct = 0
+        sd = 0
         with torch.no_grad():
             for batch in dataloader:
                 if 'text' in batch.keys():
@@ -514,7 +517,7 @@ def evaluation(prompts,
                 else:
                     inputs = batch['sentence']
                 targets = batch['label']
-                _,acc = evaluation_soft(
+                softmax_diff,acc = evaluation_soft(
                     [prompt],
                     inputs,
                     targets,
@@ -527,11 +530,66 @@ def evaluation(prompts,
                 batch_size = len(targets)
                 correct += acc[0] * batch_size
                 total += batch_size
+                sd += softmax_diff[0]
+            if debug:
+                print(inputs,targets,acc)
         accuracy = correct / total
+        soft_diff = sd / total
         accuracys.append(torch.Tensor([accuracy]))
+        sds.append(torch.Tensor([soft_diff]))
     return accuracys
     
-    
+def evaluation_sd(prompts,
+               dataset,
+               model,
+               tokenizer,
+               device,
+               verbalizer=['Yes', 'No', 'Maybe'],
+               dataset_size=100,
+               debug=False,
+               side='First',
+               MaskLM=False,
+               batch_size =16,
+               soft_diff = False,
+               ):
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=False)
+    model.eval()
+    accuracys = []
+    wrongs = []
+    sds = []
+    for prompt in prompts:
+        total = 0
+        correct = 0
+        sd = 0
+        with torch.no_grad():
+            for batch in dataloader:
+                if 'text' in batch.keys():
+                    inputs = batch['text']
+                else:
+                    inputs = batch['sentence']
+                targets = batch['label']
+                softmax_diff,acc = evaluation_soft(
+                    [prompt],
+                    inputs,
+                    targets,
+                    model,
+                    tokenizer,
+                    device,
+                    verbalizer,
+                    side=side,
+                )
+                batch_size = len(targets)
+                correct += acc[0] * batch_size
+                total += batch_size
+                sd += softmax_diff[0]
+            if debug:
+                print(inputs,targets,acc)
+        accuracy = correct / total
+        soft_diff = sd / total
+        accuracys.append(torch.Tensor([accuracy]))
+        sds.append(torch.Tensor([soft_diff]))
+
+    return accuracys, sds
     
 def evaluation_cot_full(prompts,
                dataset,
@@ -844,7 +902,7 @@ def evaluation_soft(prompts,
         mean_reward = reward.mean().cpu()
         rewards.append(mean_reward)
 
-    z_scaled_reward = get_z_scaled_reward(rewards)
+    z_scaled_reward = rewards
 
     if return_reward:
         return z_scaled_reward, accuracies, rewards

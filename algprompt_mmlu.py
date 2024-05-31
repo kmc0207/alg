@@ -49,7 +49,7 @@ def main():
     device= 'cuda:0'
     wandb.init(project='algprompt_' +args.task + '_' + args.dataset, 
                config=args,
-               name = args.task + '_' + args.dataset + '_' + args.agent_model + '_' + args.target_model)
+               name = 'validation_' + args.agent_model + '_' + args.target_model)
     
     
     if args.task == 'classification':
@@ -186,17 +186,17 @@ def main():
         
         rewards = []
         losses = []
-        accuracys,softmax_diff = utils.evaluation(
+        accuracys,softmax_diff = utils.evaluation_sd(
             used_prompt,
-            train_dataset,
+            validation_dataset,
             target_model,
             target_tokenizer,
             device,
             verbalizer.values(),
             soft_diff=True,
         )
-        print(accuracys,softmax_diff)
-        rewards = [  0.5 * softmax_diff[i] + 3 * accuracys[i] for i in range(len(used_prompt))]
+        #print(accuracys,softmax_diff)
+        rewards = [  0.1 * softmax_diff[i] + 3 * accuracys[i] for i in range(len(used_prompt))]
         np_rewards = np.array(rewards)
         np_acc = np.array(accuracys)
         rewards = [ torch.tensor(reward) for reward in rewards]
@@ -274,7 +274,7 @@ def main():
         device,
         verbalizer.values(),
     )
-    print(prompt_queue,new_acc)
+    print(len(prompt_queue),new_acc)
     for i in range(len(prompt_queue)):
         print('prompt : ',prompt_queue[i][1],'acc : ',new_acc[i])
     max_new_acc = np.max(np.array(new_acc))

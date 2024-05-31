@@ -3,7 +3,7 @@ from torch.utils.data import Dataset, DataLoader
 import json
 
 
-
+qa_dict= ['A','B','C','D']
 class TextDataset(Dataset):
     def __init__(self, texts, labels):
         """
@@ -63,24 +63,35 @@ def load_bigbench_sports_understanding():
     test_labels = labels[30:]
     return train_dataset,train_labels,test_dataset,test_labels
 
+def choice_to_sentence(choices):
+    sentence = ''
+    for idx,choice in enumerate(choices):
+        sentence += f'{qa_dict[idx]} : {choice} \n'
+    return sentence
 
 def load_mmlu(dataset_name):
     #dataset_name = dataset_name.split('-')[1]
-    train_sentences = load_dataset('cais/mmlu',dataset_name,split='test')
+    train_sentences = load_dataset('cais/mmlu',dataset_name,split='dev')
     train_labels = train_sentences['answer']
     test_sentences = load_dataset('cais/mmlu',dataset_name,split='test')
     test_labels = test_sentences['answer']
+    validation_sentences = load_dataset('cais/mmlu',dataset_name,split='validation')
+    validation_labels = validation_sentences['answer']
     #train_sentences['label'] = train_sentences['answer']
     #test_sentences['label'] = test_sentences['answer']
     train_sentences = [sentence for sentence in train_sentences]
     test_sentences = [sentence for sentence in test_sentences]
+    validation_sentences = [sentence for sentence in validation_sentences]
     for item in train_sentences:
-        item['text'] = 'question : ' + item['question'] + ' choices : ' + str(item['choices'])
+        item['text'] = 'question : ' + item['question'] + ' choices : ' + choice_to_sentence(item['choices'])
         item['label'] = item['answer']
     for item in test_sentences:
-        item['text'] = 'question : ' + item['question'] + ' choices : ' + str(item['choices'])
+        item['text'] = 'question : ' + item['question'] + ' choices : ' + choice_to_sentence(item['choices'])
         item['label'] = item['answer']
-    return train_sentences, train_labels, test_sentences, test_labels
+    for item in validation_sentences:
+        item['text'] = 'question : ' + item['question'] + ' choices : ' + choice_to_sentence(item['choices'])
+        item['label'] = item['answer']
+    return train_sentences, train_labels, test_sentences, test_labels, validation_sentences, validation_labels
 
 def load_squad():
     train_sentences = load_dataset('rajpurkar/squad',split='train')
